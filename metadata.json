@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Consistent Character Generator",
+  "description": "An application that helps users create consistent characters across multiple scenes. It analyzes natural language prompts to generate a structured JSON description, then uses that JSON to generate an image with Gemini.",
+  "requestFramePermissions": []
+}
