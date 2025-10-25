@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [completedCount, setCompletedCount] = useState<number>(0);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isCancelledRef = useRef<boolean>(false);
 
   const [apiKey, setApiKey] = useState<string>('');
   const [tempApiKey, setTempApiKey] = useState<string>('');
@@ -116,14 +117,27 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const handleStopGeneration = () => {
+    isCancelledRef.current = true;
+    setProgressMessage("Cancellation signal sent. Finishing current step...");
+  };
+
   const handleGenerateAll = useCallback(async () => {
     if (!results.length || isProcessing || !isApiKeySet) return;
 
+    isCancelledRef.current = false;
     setIsProcessing(true);
     setCompletedCount(0);
     let baseCharacter: Pick<CharacterPrompt, 'character_id' | 'appearance'> | undefined = undefined;
     
+    const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
     for (let i = 0; i < results.length; i++) {
+      if (isCancelledRef.current) {
+        setProgressMessage(`Processing cancelled by user.`);
+        break;
+      }
+      
       const currentScene = results[i];
       setProgressMessage(`Processing scene ${i + 1} of ${results.length}: "${currentScene.scene}"`);
       
@@ -131,6 +145,10 @@ const App: React.FC = () => {
         setResults(prev => prev.map(r => r.id === i ? { ...r, status: 'analyzing' } : r));
         const jsonPrompt = await generateCharacterJson(currentScene.scene, apiKey, baseCharacter);
         
+        if (isCancelledRef.current) {
+            break;
+        }
+
         if (i === 0) {
           baseCharacter = {
             character_id: jsonPrompt.character_id,
@@ -156,10 +174,16 @@ const App: React.FC = () => {
         setResults(prev => prev.map(r => r.id === i ? { ...r, status: 'error', error: err.message } : r));
       } finally {
         setCompletedCount(prev => prev + 1);
+        if (i < results.length - 1 && !isCancelledRef.current) {
+            setProgressMessage(`Waiting 1 second before next scene to avoid rate limits...`);
+            await delay(1000);
+        }
       }
     }
 
-    setProgressMessage(`Batch processing complete. ${results.length} scenes processed.`);
+    if (!isCancelledRef.current) {
+        setProgressMessage(`Batch processing complete. ${results.length} scenes processed.`);
+    }
     setIsProcessing(false);
   }, [results, isProcessing, isApiKeySet, apiKey]);
 
@@ -185,6 +209,7 @@ const App: React.FC = () => {
   }, [results, isProcessing, handleDownloadImage]);
 
   const handleReset = () => {
+    isCancelledRef.current = true;
     setResults([]);
     setFileName('');
     setIsProcessing(false);
@@ -281,9 +306,7 @@ const App: React.FC = () => {
             {isApiKeySet ? (
               <div className="flex flex-wrap gap-4 items-center">
                 <p className="text-green-400 font-semibold">API Key is set and saved in your browser.</p>
-                {/* FIX: Added icon prop to IconButton */}
                 <IconButton onClick={handleEditKey} icon={<KeyIcon />} label="Edit Key" className="!bg-gray-600 hover:!bg-gray-700" />
-                {/* FIX: Added icon prop to IconButton */}
                 <IconButton onClick={handleClearKey} icon={<ClearIcon />} label="Clear Key" className="!bg-red-600 hover:!bg-red-700" />
               </div>
             ) : (
@@ -295,7 +318,6 @@ const App: React.FC = () => {
                   placeholder="Enter your Gemini API Key here"
                   className="flex-grow bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-gray-500"
                 />
-                {/* FIX: Added icon prop to IconButton */}
                 <IconButton onClick={handleSaveKey} icon={<KeyIcon />} label="Save Key" disabled={!tempApiKey.trim()} />
               </div>
             )}
@@ -310,8 +332,22 @@ const App: React.FC = () => {
                       <UploadIcon />
                       <span>Upload .json File</span>
                   </label>
-                <IconButton onClick={handleGenerateAll} disabled={isProcessing || results.length === 0 || !isApiKeySet} icon={<BrainIcon />} label="Generate All Images" />
-                <IconButton onClick={handleReset} disabled={isProcessing || !isApiKeySet} icon={<ClearIcon />} label="Reset" className="!bg-red-600 hover:!bg-red-700 disabled:!bg-red-400 focus:!ring-red-500" />
+                  {isProcessing ? (
+                    <IconButton 
+                      onClick={handleStopGeneration} 
+                      icon={<ClearIcon />} 
+                      label="Stop Generation" 
+                      className="!bg-yellow-600 hover:!bg-yellow-700 focus:!ring-yellow-500"
+                    />
+                  ) : (
+                    <IconButton 
+                      onClick={handleGenerateAll} 
+                      disabled={results.length === 0 || !isApiKeySet} 
+                      icon={<BrainIcon />} 
+                      label="Generate All Images" 
+                    />
+                  )}
+                  <IconButton onClick={handleReset} disabled={isProcessing && !isCancelledRef.current || !isApiKeySet} icon={<ClearIcon />} label="Reset" className="!bg-red-600 hover:!bg-red-700 disabled:!bg-red-400 focus:!ring-red-500" />
               </div>
               <div className="mt-4 text-gray-400 text-sm">
                   {fileName && !fileError && <p>File: <span className="font-semibold text-indigo-400">{fileName}</span> ({results.length} scenes found)</p>}
