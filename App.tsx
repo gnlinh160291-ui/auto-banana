@@ -140,6 +140,18 @@ const App: React.FC = () => {
     document.body.removeChild(link);
   }, []);
 
+  const handleDownloadAllImages = useCallback(() => {
+    const completedResults = results.filter(r => r.status === 'complete' && r.image);
+    if (completedResults.length === 0 || isProcessing) return;
+
+    completedResults.forEach((result, index) => {
+        // Add a small delay between downloads to prevent the browser from blocking them
+        setTimeout(() => {
+            handleDownloadImage(result);
+        }, index * 300);
+    });
+  }, [results, isProcessing, handleDownloadImage]);
+
   const handleReset = () => {
     setResults([]);
     setFileName('');
@@ -212,6 +224,8 @@ const App: React.FC = () => {
         <span className="text-sm font-semibold">{text.toUpperCase()}</span>
     </div>
   );
+  
+  const completedImagesCount = results.filter(r => r.status === 'complete').length;
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-4 sm:p-6 lg:p-8 font-sans">
@@ -266,7 +280,17 @@ const App: React.FC = () => {
           )}
 
           <div>
-            <h2 className="text-xl font-bold mb-4">3. Results</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">3. Results</h2>
+              {completedImagesCount > 0 && (
+                <IconButton
+                  onClick={handleDownloadAllImages}
+                  disabled={isProcessing}
+                  icon={<DownloadIcon />}
+                  label={`Download All (${completedImagesCount})`}
+                />
+              )}
+            </div>
             {results.length > 0 ? (
                 <>
                 {isProcessing && (
