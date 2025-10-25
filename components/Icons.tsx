@@ -67,3 +67,11 @@ export const UserCircleIcon = () => (
         <path d="M6.168 18.849a4 4 0 0 1 3.832 -2.849h4a4 4 0 0 1 3.834 2.855" />
     </svg>
 );
+
+export const KeyIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+        <path d="M16.555 3.843l-6.555 6.557a2 2 0 0 1 -2.828 0l-4.244 -4.243a8 8 0 1 1 13.628 -5.628z" />
+        <path d="M15 9h.01" />
+    </svg>
+);

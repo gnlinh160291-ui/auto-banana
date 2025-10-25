@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { generateCharacterJson, generateImageFromPrompt } from './services/geminiService';
 import { CharacterPrompt, SceneResult } from './types';
 import { IconButton } from './components/IconButton';
-import { BrainIcon, ImageIcon, DownloadIcon, UploadIcon, ClearIcon, CodeIcon, UserCircleIcon } from './components/Icons';
+import { BrainIcon, ImageIcon, DownloadIcon, UploadIcon, ClearIcon, CodeIcon, UserCircleIcon, KeyIcon } from './components/Icons';
 
 const App: React.FC = () => {
   const [results, setResults] = useState<SceneResult[]>([]);
@@ -19,6 +19,39 @@ const App: React.FC = () => {
   const [completedCount, setCompletedCount] = useState<number>(0);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [apiKey, setApiKey] = useState<string>('');
+  const [tempApiKey, setTempApiKey] = useState<string>('');
+  const [isApiKeySet, setIsApiKeySet] = useState<boolean>(false);
+
+  useEffect(() => {
+    const storedApiKey = localStorage.getItem('gemini-api-key');
+    if (storedApiKey) {
+      setApiKey(storedApiKey);
+      setTempApiKey(storedApiKey);
+      setIsApiKeySet(true);
+    }
+  }, []);
+
+  const handleSaveKey = () => {
+    if (tempApiKey.trim()) {
+      const trimmedKey = tempApiKey.trim();
+      setApiKey(trimmedKey);
+      localStorage.setItem('gemini-api-key', trimmedKey);
+      setIsApiKeySet(true);
+    }
+  };
+
+  const handleEditKey = () => {
+    setIsApiKeySet(false);
+  };
+  
+  const handleClearKey = () => {
+      setApiKey('');
+      setTempApiKey('');
+      localStorage.removeItem('gemini-api-key');
+      setIsApiKeySet(false);
+  }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -84,7 +117,7 @@ const App: React.FC = () => {
   };
 
   const handleGenerateAll = useCallback(async () => {
-    if (!results.length || isProcessing) return;
+    if (!results.length || isProcessing || !isApiKeySet) return;
 
     setIsProcessing(true);
     setCompletedCount(0);
@@ -96,7 +129,7 @@ const App: React.FC = () => {
       
       try {
         setResults(prev => prev.map(r => r.id === i ? { ...r, status: 'analyzing' } : r));
-        const jsonPrompt = await generateCharacterJson(currentScene.scene, baseCharacter);
+        const jsonPrompt = await generateCharacterJson(currentScene.scene, apiKey, baseCharacter);
         
         if (i === 0) {
           baseCharacter = {
@@ -107,7 +140,7 @@ const App: React.FC = () => {
         }
 
         setResults(prev => prev.map(r => r.id === i ? { ...r, status: 'generating', jsonPrompt } : r));
-        const imageData = await generateImageFromPrompt(jsonPrompt);
+        const imageData = await generateImageFromPrompt(jsonPrompt, apiKey);
         
         setResults(prev => prev.map(r => r.id === i ? { 
             ...r, 
@@ -128,7 +161,7 @@ const App: React.FC = () => {
 
     setProgressMessage(`Batch processing complete. ${results.length} scenes processed.`);
     setIsProcessing(false);
-  }, [results, isProcessing]);
+  }, [results, isProcessing, isApiKeySet, apiKey]);
 
   const handleDownloadImage = useCallback((result: SceneResult) => {
     if (!result.image || !result.jsonPrompt) return;
@@ -145,7 +178,6 @@ const App: React.FC = () => {
     if (completedResults.length === 0 || isProcessing) return;
 
     completedResults.forEach((result, index) => {
-        // Add a small delay between downloads to prevent the browser from blocking them
         setTimeout(() => {
             handleDownloadImage(result);
         }, index * 300);
@@ -181,7 +213,7 @@ const App: React.FC = () => {
   }
 
   const handleRegenerate = async () => {
-    if (!editingScene) return;
+    if (!editingScene || !isApiKeySet) return;
 
     let parsedJson: CharacterPrompt;
     try {
@@ -197,7 +229,7 @@ const App: React.FC = () => {
     handleCloseEditModal();
 
     try {
-      const imageData = await generateImageFromPrompt(parsedJson);
+      const imageData = await generateImageFromPrompt(parsedJson, apiKey);
       setResults(prev => prev.map(r => r.id === editingScene.id ? {
         ...r,
         status: 'complete',
@@ -240,97 +272,129 @@ const App: React.FC = () => {
         </header>
 
         <main className="flex flex-col gap-8">
+
           <div className="p-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700">
-            <h2 className="text-xl font-bold mb-4">1. Upload &amp; Generate</h2>
-            <div className="flex flex-wrap gap-4 items-center">
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" id="file-upload" disabled={isProcessing} />
-                <label htmlFor="file-upload" className={`flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-colors duration-200 ${isProcessing ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
-                    <UploadIcon />
-                    <span>Upload .json File</span>
-                </label>
-              <IconButton onClick={handleGenerateAll} disabled={isProcessing || results.length === 0} icon={<BrainIcon />} label="Generate All Images" />
-              <IconButton onClick={handleReset} disabled={isProcessing} icon={<ClearIcon />} label="Reset" className="!bg-red-600 hover:!bg-red-700 disabled:!bg-red-400 focus:!ring-red-500" />
-            </div>
-            <div className="mt-4 text-gray-400 text-sm">
-                {fileName && !fileError && <p>File: <span className="font-semibold text-indigo-400">{fileName}</span> ({results.length} scenes found)</p>}
-                {fileError && <p className="font-semibold text-red-400">{fileError}</p>}
-                {isProcessing && <p className="mt-2">Status: <span className="font-semibold text-yellow-400">{progressMessage}</span></p>}
-            </div>
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-3">
+              <KeyIcon />
+              1. Configure Gemini API Key
+            </h2>
+            {isApiKeySet ? (
+              <div className="flex flex-wrap gap-4 items-center">
+                <p className="text-green-400 font-semibold">API Key is set and saved in your browser.</p>
+                {/* FIX: Added icon prop to IconButton */}
+                <IconButton onClick={handleEditKey} icon={<KeyIcon />} label="Edit Key" className="!bg-gray-600 hover:!bg-gray-700" />
+                {/* FIX: Added icon prop to IconButton */}
+                <IconButton onClick={handleClearKey} icon={<ClearIcon />} label="Clear Key" className="!bg-red-600 hover:!bg-red-700" />
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-4">
+                <input
+                  type="password"
+                  value={tempApiKey}
+                  onChange={(e) => setTempApiKey(e.target.value)}
+                  placeholder="Enter your Gemini API Key here"
+                  className="flex-grow bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-gray-500"
+                />
+                {/* FIX: Added icon prop to IconButton */}
+                <IconButton onClick={handleSaveKey} icon={<KeyIcon />} label="Save Key" disabled={!tempApiKey.trim()} />
+              </div>
+            )}
           </div>
           
-          {baseCharacterProfile && (
-            <div className="p-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700 animate-fade-in">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-3 text-indigo-400">
-                <UserCircleIcon />
-                2. Consistent Character Profile
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-400">Character ID</p>
-                  <p className="font-mono text-green-400 bg-gray-900 px-2 py-1 rounded w-fit">{baseCharacterProfile.character_id}</p>
-                </div>
-                {Object.entries(baseCharacterProfile.appearance).map(([key, value]) => (
-                  <div key={key}>
-                    <p className="text-gray-400 capitalize">{key.replace('_', ' ')}</p>
-                    <p className="font-semibold text-base">{value}</p>
-                  </div>
-                ))}
+          <div className={!isApiKeySet ? 'opacity-50 pointer-events-none' : ''}>
+            <div className="p-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700 mb-8">
+              <h2 className="text-xl font-bold mb-4">2. Upload &amp; Generate</h2>
+              <div className="flex flex-wrap gap-4 items-center">
+                  <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" id="file-upload" disabled={isProcessing || !isApiKeySet} />
+                  <label htmlFor="file-upload" className={`flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition-colors duration-200 ${isProcessing || !isApiKeySet ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                      <UploadIcon />
+                      <span>Upload .json File</span>
+                  </label>
+                <IconButton onClick={handleGenerateAll} disabled={isProcessing || results.length === 0 || !isApiKeySet} icon={<BrainIcon />} label="Generate All Images" />
+                <IconButton onClick={handleReset} disabled={isProcessing || !isApiKeySet} icon={<ClearIcon />} label="Reset" className="!bg-red-600 hover:!bg-red-700 disabled:!bg-red-400 focus:!ring-red-500" />
+              </div>
+              <div className="mt-4 text-gray-400 text-sm">
+                  {fileName && !fileError && <p>File: <span className="font-semibold text-indigo-400">{fileName}</span> ({results.length} scenes found)</p>}
+                  {fileError && <p className="font-semibold text-red-400">{fileError}</p>}
+                  {isProcessing && <p className="mt-2">Status: <span className="font-semibold text-yellow-400">{progressMessage}</span></p>}
+                  {!isApiKeySet && <p className="font-semibold text-yellow-400">Please set your API key above to enable generation.</p>}
               </div>
             </div>
-          )}
+            
+            {baseCharacterProfile && (
+              <div className="p-6 bg-gray-800 rounded-xl shadow-lg border border-gray-700 mb-8 animate-fade-in">
+                <h2 className="text-xl font-bold mb-4 flex items-center gap-3 text-indigo-400">
+                  <UserCircleIcon />
+                  3. Consistent Character Profile
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-400">Character ID</p>
+                    <p className="font-mono text-green-400 bg-gray-900 px-2 py-1 rounded w-fit">{baseCharacterProfile.character_id}</p>
+                  </div>
+                  {Object.entries(baseCharacterProfile.appearance).map(([key, value]) => (
+                    <div key={key}>
+                      <p className="text-gray-400 capitalize">{key.replace('_', ' ')}</p>
+                      <p className="font-semibold text-base">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          <div>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">3. Results</h2>
-              {completedImagesCount > 0 && (
-                <IconButton
-                  onClick={handleDownloadAllImages}
-                  disabled={isProcessing}
-                  icon={<DownloadIcon />}
-                  label={`Download All (${completedImagesCount})`}
-                />
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">4. Results</h2>
+                {completedImagesCount > 0 && (
+                  <IconButton
+                    onClick={handleDownloadAllImages}
+                    disabled={isProcessing}
+                    icon={<DownloadIcon />}
+                    label={`Download All (${completedImagesCount})`}
+                  />
+                )}
+              </div>
+              {results.length > 0 ? (
+                  <>
+                  {isProcessing && (
+                      <div className="mb-6">
+                          <div className="flex justify-between mb-1">
+                              <span className="text-base font-medium text-indigo-400">Overall Progress</span>
+                              <span className="text-sm font-medium text-indigo-400">{completedCount} / {results.length}</span>
+                          </div>
+                          <div className="w-full bg-gray-700 rounded-full h-2.5">
+                              <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${results.length > 0 ? (completedCount / results.length) * 100 : 0}%`, transition: 'width 0.5s ease-in-out' }}></div>
+                          </div>
+                      </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {results.map((result) => (
+                      <div key={result.id} className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 flex flex-col">
+                          <div className="aspect-square w-full bg-gray-900 rounded-t-xl flex items-center justify-center overflow-hidden">
+                              {result.status === 'pending' && <div className="text-gray-500 text-center p-4"><ImageIcon /><p className="mt-2">Waiting to process</p></div>}
+                              {result.status === 'analyzing' && loadingSpinner('Analyzing')}
+                              {result.status === 'generating' && loadingSpinner('Generating')}
+                              {result.status === 'error' && <div className="text-red-400 p-4 text-center">Error: {result.error}</div>}
+                              {result.status === 'complete' && result.image && <img src={result.image} alt={`Scene: ${result.scene}`} className="w-full h-full object-cover" />}
+                          </div>
+                          <div className="p-4 flex flex-col flex-grow">
+                              <p className="text-sm text-gray-400 flex-grow mb-4">&quot;{result.scene}&quot;</p>
+                              <div className="flex gap-2 mt-auto">
+                                  <IconButton onClick={() => handleOpenEditModal(result)} disabled={!result.jsonPrompt} icon={<CodeIcon />} label="Edit JSON" className="flex-1 !bg-gray-600 hover:!bg-gray-700 disabled:!bg-gray-500" />
+                                  <IconButton onClick={() => handleDownloadImage(result)} disabled={result.status !== 'complete'} icon={<DownloadIcon />} label="Download" className="flex-1" />
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+              </>
+              ) : (
+                  <div className="text-center py-16 text-gray-500 bg-gray-800 rounded-xl border-2 border-dashed border-gray-700">
+                      <p>Upload a .json file with your scene descriptions to begin.</p>
+                      <p className="text-sm mt-2">Example formats: <code className="bg-gray-900 p-1 rounded text-gray-400">["scene one", "scene two"]</code> or <code className="bg-gray-900 p-1 rounded text-gray-400">{`[{"scene": "..."}]`}</code></p>
+                  </div>
               )}
             </div>
-            {results.length > 0 ? (
-                <>
-                {isProcessing && (
-                    <div className="mb-6">
-                        <div className="flex justify-between mb-1">
-                            <span className="text-base font-medium text-indigo-400">Overall Progress</span>
-                            <span className="text-sm font-medium text-indigo-400">{completedCount} / {results.length}</span>
-                        </div>
-                        <div className="w-full bg-gray-700 rounded-full h-2.5">
-                            <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${results.length > 0 ? (completedCount / results.length) * 100 : 0}%`, transition: 'width 0.5s ease-in-out' }}></div>
-                        </div>
-                    </div>
-                )}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {results.map((result) => (
-                    <div key={result.id} className="bg-gray-800 rounded-xl shadow-lg border border-gray-700 flex flex-col">
-                        <div className="aspect-square w-full bg-gray-900 rounded-t-xl flex items-center justify-center overflow-hidden">
-                            {result.status === 'pending' && <div className="text-gray-500 text-center p-4"><ImageIcon /><p className="mt-2">Waiting to process</p></div>}
-                            {result.status === 'analyzing' && loadingSpinner('Analyzing')}
-                            {result.status === 'generating' && loadingSpinner('Generating')}
-                            {result.status === 'error' && <div className="text-red-400 p-4 text-center">Error: {result.error}</div>}
-                            {result.status === 'complete' && result.image && <img src={result.image} alt={`Scene: ${result.scene}`} className="w-full h-full object-cover" />}
-                        </div>
-                        <div className="p-4 flex flex-col flex-grow">
-                            <p className="text-sm text-gray-400 flex-grow mb-4">&quot;{result.scene}&quot;</p>
-                            <div className="flex gap-2 mt-auto">
-                                <IconButton onClick={() => handleOpenEditModal(result)} disabled={!result.jsonPrompt} icon={<CodeIcon />} label="Edit JSON" className="flex-1 !bg-gray-600 hover:!bg-gray-700 disabled:!bg-gray-500" />
-                                <IconButton onClick={() => handleDownloadImage(result)} disabled={result.status !== 'complete'} icon={<DownloadIcon />} label="Download" className="flex-1" />
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-            </>
-            ) : (
-                <div className="text-center py-16 text-gray-500 bg-gray-800 rounded-xl border-2 border-dashed border-gray-700">
-                    <p>Upload a .json file with your scene descriptions to begin.</p>
-                    <p className="text-sm mt-2">Example formats: <code className="bg-gray-900 p-1 rounded text-gray-400">["scene one", "scene two"]</code> or <code className="bg-gray-900 p-1 rounded text-gray-400">{`[{"scene": "..."}]`}</code></p>
-                </div>
-            )}
           </div>
         </main>
       </div>

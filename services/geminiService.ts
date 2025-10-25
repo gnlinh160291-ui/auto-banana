@@ -1,14 +1,5 @@
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { CharacterPrompt } from '../types';
-
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const characterPromptSchema = {
   type: Type.OBJECT,
@@ -47,8 +38,10 @@ const characterPromptSchema = {
 
 export const generateCharacterJson = async (
   sceneDescription: string,
+  apiKey: string,
   baseCharacter?: Pick<CharacterPrompt, 'character_id' | 'appearance'>
 ): Promise<CharacterPrompt> => {
+  const ai = new GoogleGenAI({ apiKey });
   const systemInstruction = baseCharacter
     ? `You are an expert creative assistant. Your task is to analyze a new scene description for an existing character and generate a structured JSON object.
        **Use the following character definition PRECISELY for 'character_id' and 'appearance'**:
@@ -78,7 +71,8 @@ export const generateCharacterJson = async (
 };
 
 
-export const generateImageFromPrompt = async (prompt: CharacterPrompt): Promise<string> => {
+export const generateImageFromPrompt = async (prompt: CharacterPrompt, apiKey: string): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey });
   const stringifiedPrompt = JSON.stringify(prompt, null, 2);
   
   const response = await ai.models.generateContent({
