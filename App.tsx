@@ -10,7 +10,12 @@ const App: React.FC = () => {
   const [fileName, setFileName] = useState<string>('');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [baseCharacterProfile, setBaseCharacterProfile] = useState<Pick<CharacterPrompt, 'character_id' | 'appearance'> | null>(null);
-  const [viewingJson, setViewingJson] = useState<CharacterPrompt | null>(null);
+  
+  const [editingScene, setEditingScene] = useState<SceneResult | null>(null);
+  const [editedJsonText, setEditedJsonText] = useState<string>('');
+  const [jsonEditError, setJsonEditError] = useState<string | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState<boolean>(false);
+
   const [completedCount, setCompletedCount] = useState<number>(0);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,13 +146,61 @@ const App: React.FC = () => {
     setIsProcessing(false);
     setProgressMessage('');
     setBaseCharacterProfile(null);
-    setViewingJson(null);
+    setEditingScene(null);
     setCompletedCount(0);
     setFileError(null);
     if(fileInputRef.current) {
         fileInputRef.current.value = '';
     }
   };
+  
+  const handleOpenEditModal = (result: SceneResult) => {
+    if (!result.jsonPrompt) return;
+    setEditingScene(result);
+    setEditedJsonText(JSON.stringify(result.jsonPrompt, null, 2));
+    setJsonEditError(null);
+  };
+  
+  const handleCloseEditModal = () => {
+    if (isRegenerating) return;
+    setEditingScene(null);
+    setEditedJsonText('');
+    setJsonEditError(null);
+  }
+
+  const handleRegenerate = async () => {
+    if (!editingScene) return;
+
+    let parsedJson: CharacterPrompt;
+    try {
+      parsedJson = JSON.parse(editedJsonText);
+      setJsonEditError(null);
+    } catch (e) {
+      setJsonEditError("Invalid JSON format. Please check for syntax errors.");
+      return;
+    }
+
+    setIsRegenerating(true);
+    setResults(prev => prev.map(r => r.id === editingScene.id ? { ...r, status: 'generating', jsonPrompt: parsedJson } : r));
+    handleCloseEditModal();
+
+    try {
+      const imageData = await generateImageFromPrompt(parsedJson);
+      setResults(prev => prev.map(r => r.id === editingScene.id ? {
+        ...r,
+        status: 'complete',
+        image: `data:image/png;base64,${imageData}`,
+        error: null
+      } : r));
+    } catch (e) {
+      const err = e as Error;
+      console.error(`Error regenerating scene ${editingScene.id + 1}:`, err);
+      setResults(prev => prev.map(r => r.id === editingScene.id ? { ...r, status: 'error', error: err.message } : r));
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
 
   const loadingSpinner = (text: string) => (
     <div className="flex flex-col items-center justify-center text-center gap-2 text-gray-400">
@@ -240,7 +293,7 @@ const App: React.FC = () => {
                         <div className="p-4 flex flex-col flex-grow">
                             <p className="text-sm text-gray-400 flex-grow mb-4">&quot;{result.scene}&quot;</p>
                             <div className="flex gap-2 mt-auto">
-                                <IconButton onClick={() => result.jsonPrompt && setViewingJson(result.jsonPrompt)} disabled={!result.jsonPrompt} icon={<CodeIcon />} label="JSON" className="flex-1 !bg-gray-600 hover:!bg-gray-700 disabled:!bg-gray-500" />
+                                <IconButton onClick={() => handleOpenEditModal(result)} disabled={!result.jsonPrompt} icon={<CodeIcon />} label="Edit JSON" className="flex-1 !bg-gray-600 hover:!bg-gray-700 disabled:!bg-gray-500" />
                                 <IconButton onClick={() => handleDownloadImage(result)} disabled={result.status !== 'complete'} icon={<DownloadIcon />} label="Download" className="flex-1" />
                             </div>
                         </div>
@@ -258,19 +311,28 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {viewingJson && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={() => setViewingJson(null)}>
+      {editingScene && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={handleCloseEditModal}>
           <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col border border-gray-700" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4 flex-shrink-0">
-              <h3 className="text-lg font-bold text-indigo-400">Scene JSON Prompt</h3>
-              <button onClick={() => setViewingJson(null)} className="text-gray-400 hover:text-white">
+              <h3 className="text-lg font-bold text-indigo-400">Edit JSON Prompt for Scene {editingScene.id + 1}</h3>
+              <button onClick={handleCloseEditModal} className="text-gray-400 hover:text-white disabled:opacity-50" disabled={isRegenerating}>
                 <ClearIcon />
               </button>
             </div>
-            <div className="overflow-auto">
-              <pre className="bg-gray-900 text-green-300 p-4 rounded-md text-sm whitespace-pre-wrap break-all">
-                <code>{JSON.stringify(viewingJson, null, 2)}</code>
-              </pre>
+            <div className="overflow-auto flex-grow flex flex-col">
+              <textarea
+                value={editedJsonText}
+                onChange={(e) => setEditedJsonText(e.target.value)}
+                className="w-full flex-grow bg-gray-900 text-green-300 p-4 rounded-md text-sm whitespace-pre-wrap break-all font-mono border border-gray-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                rows={15}
+                disabled={isRegenerating}
+              />
+            </div>
+            {jsonEditError && <p className="text-red-400 text-sm mt-2">{jsonEditError}</p>}
+            <div className="mt-4 flex-shrink-0 flex justify-end gap-4">
+                <button onClick={handleCloseEditModal} className="px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 disabled:opacity-50" disabled={isRegenerating}>Cancel</button>
+                <IconButton onClick={handleRegenerate} icon={isRegenerating ? <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div> : <BrainIcon />} label={isRegenerating ? "Regenerating..." : "Save & Regenerate"} disabled={isRegenerating} />
             </div>
           </div>
         </div>
